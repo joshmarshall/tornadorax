@@ -5,7 +5,7 @@ import time
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
-from tornadorax import service_registry
+from tornadorax.services import service_registry
 from tornadorax import utilities
 
 
@@ -22,6 +22,7 @@ class IdentityClient(object):
         self.service_catalog = None
         self.token = None
         self.token_expires = 0
+        self.default_region = None
 
     @gen.coroutine
     def fetch_token(self):
@@ -71,18 +72,22 @@ class IdentityClient(object):
 
         auth_response = json.loads(response.body)
         self.token = auth_response["access"]["token"]["id"]
+        # this will need to be augmented for other openstack providers
+        self.default_region = auth_response["access"].get("user", {}).get(
+            "RAX-AUTH:defaultRegion", None)
         self.token_expires = auth_response["access"]["token"]["expires"]
         self.service_catalog = auth_response["access"]["serviceCatalog"]
         raise gen.Return({"status": "success", "token": self.token})
 
-    def build_service(self, service_type):
+    def build_service(self, service_type, region=None, internal=False):
         if not self.service_catalog:
             raise NoServiceCatalog(
                 "No service catalog has been associated with this "
                 "identity client. Try yielding authorize() first.")
+        region = region or self.default_region
         return service_registry.build_service(
             service_type, self.service_catalog, ioloop=self.ioloop,
-            fetch_token=self.fetch_token)
+            fetch_token=self.fetch_token, region=region, internal=internal)
 
 
 class NoServiceCatalog(Exception):

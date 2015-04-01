@@ -2,7 +2,7 @@ from tornado import gen
 from tornado.testing import AsyncTestCase
 
 from tests.helpers.foo_service import FooService
-from tornadorax import service_registry
+from tornadorax.services import service_registry
 
 
 ENDPOINTS = [
@@ -70,3 +70,4 @@ class TestServiceRegistry(AsyncTestCase):
     def test_service_registry_already_includes_core_services(self):
         self.build("rax:queues")
         self.build("object-store")
+        self.build("rax:load-balancer")

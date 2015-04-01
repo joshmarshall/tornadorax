@@ -1,9 +1,9 @@
 import json
 
-from tornado import gen
 from tornado.testing import AsyncTestCase, gen_test
 from testnado.service_case_helpers import ServiceCaseHelpers
 
+from tests.helpers.service_helpers import fetch_token
 from tornadorax.services.queue_service import QueueService
 
 
@@ -43,10 +43,6 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
             "GET", "/v1/queues/myqueue/messages", get_message_handle)
         self.queue_service.add_method(
             "POST", "/v1/queues/myqueue/messages", post_message_handle)
-
-        @gen.coroutine
-        def fetch_token():
-            raise gen.Return("TOKEN")
 
         self.client = QueueService(
             self.queue_service.url("v1"), fetch_token=fetch_token,
@@ -132,3 +128,11 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
         self.assertEqual("error", result["status"])
         self.assertEqual(404, result["code"])
         self.assertEqual("ERROR", result["body"])
+
+    @gen_test
+    def test_wait_for_message_returns_after_multiple_fetches(self):
+        # placeholder for a little more friendly interface for
+        # tornaodo for longer polling
+
+        # message = yield.queue.wait_for_messages()
+        pass

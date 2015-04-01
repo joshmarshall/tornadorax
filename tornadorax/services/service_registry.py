@@ -1,5 +1,6 @@
 from tornadorax.services.queue_service import QueueService
 from tornadorax.services.storage_service import StorageService
+from tornadorax.services.load_balancer_service import LoadBalancerService
 
 
 SERVICES = {}
@@ -11,6 +12,7 @@ def register_service(service_type, service_class):
 
 # registering default services included in this project
 register_service("rax:queues", QueueService)
+register_service("rax:load-balancer", LoadBalancerService)
 register_service("object-store", StorageService)
 
 

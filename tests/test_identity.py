@@ -5,21 +5,21 @@ import mock
 from tornado.testing import AsyncTestCase, gen_test
 from testnado.service_case_helpers import ServiceCaseHelpers
 
-from tornadorax import service_registry
+from tornadorax.services import service_registry
 from tornadorax.identity_client import IdentityClient, NoServiceCatalog
 from tests.helpers.foo_service import FooService
-from tests.samples import RAX_AUTH_DATA
+from tests.samples import identity_samples
 
 
 class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
 
     def setUp(self):
         super(TestIdentity, self).setUp()
+        self.auth_data = identity_samples.RAX_AUTH_DATA.copy()
 
         def id_handle(handler):
             self.identity_requests.append(handler.request)
-            auth_data = json.dumps(RAX_AUTH_DATA)
-            handler.finish(auth_data)
+            handler.finish(self.auth_data)
 
         self.identity_service = self.add_service()
         self.identity_service.add_method("POST", "/v2.0/tokens", id_handle)
@@ -69,7 +69,7 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
 
     @gen_test
     def test_authorize_retries_on_500s(self):
-        responses = [(500, ""), (501, ""), (503, ""), (201, RAX_AUTH_DATA)]
+        responses = [(500, ""), (501, ""), (503, ""), (201, self.auth_data)]
 
         def id_handle(handler):
             status, body = responses.pop(0)
@@ -101,6 +101,36 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
     def test_build_service_raises_exception_if_not_authorized(self):
         with self.assertRaises(NoServiceCatalog):
             self.client.build_service("foo:service")
+
+    @gen_test
+    def test_build_service_uses_rax_default_region_if_specified(self):
+        self.auth_data["access"]["user"] = {
+            "RAX-AUTH:defaultRegion": "ORD"
+        }
+        self.start_services()
+
+        yield self.client.authorize()
+        service = self.client.build_service("foo:service")
+        service.assert_service_url_equals("https://ord.public.com/v1")
+        yield service.assert_token_equals("TOKEN")
+
+    @gen_test
+    def test_build_service_allows_region_specification(self):
+        self.start_services()
+
+        yield self.client.authorize()
+        service = self.client.build_service("foo:service", region="ORD")
+        service.assert_service_url_equals("https://ord.public.com/v1")
+        yield service.assert_token_equals("TOKEN")
+
+    @gen_test
+    def test_build_service_allows_internal_specification(self):
+        self.start_services()
+
+        yield self.client.authorize()
+        service = self.client.build_service("foo:service", internal=True)
+        service.assert_service_url_equals("https://dfw.internal.com/v1")
+        yield service.assert_token_equals("TOKEN")
 
     @gen_test
     def test_fetch_token_returns_token_value(self):

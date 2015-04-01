@@ -4,9 +4,6 @@ RAX_AUTH_DATA = {
             "expires": "2015-06-12T22:51:02.000-06:00",
             "id": "TOKEN"
         },
-        "user": {
-            "RAX-AUTH:defaultRegion": "ORD"
-        },
         "serviceCatalog": [
             {
                 "endpoints": [

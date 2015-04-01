@@ -1,10 +1,12 @@
+import json
 import hashlib
 
-from tornado import gen
 from tornado.testing import AsyncTestCase, gen_test
 from testnado.service_case_helpers import ServiceCaseHelpers
 
+from tests.helpers.service_helpers import fetch_token
 from tornadorax.services.storage_service import StorageService
+from tornadorax.services.storage_service import SegmentWriter
 
 
 class TestStorage(ServiceCaseHelpers, AsyncTestCase):
@@ -24,10 +26,6 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         self.storage_service = self.add_service()
         self.storage_service.add_method(
             "PUT", "/v1/container/object", object_write_handle)
-
-        @gen.coroutine
-        def fetch_token():
-            raise gen.Return("TOKEN")
 
         self.client = StorageService(
             self.storage_service.url("/v1"), fetch_token=fetch_token,
@@ -88,7 +86,61 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         request = self.object_write_requests[0]
         self.assertEqual("8", request.headers["Content-length"])
 
-    # TODO: Add support for large files in BodyWriter. It can either
-    # use static large objects, in which case there may be a maximum number
-    # of segment files, or dynamic large objects, in which case there may
-    # be an eventual consistency issue
+    @gen_test
+    def test_upload_stream_allows_segmentation(self):
+        # big, nasty segment test. should be broken up later, especially
+        # with retry, etc.
+
+        def request_write_handle(handler):
+            handler.set_status(201)
+            handler.set_header(
+                "ETag", hashlib.md5(handler.request.body).hexdigest())
+            handler.finish()
+
+        self.storage_service.add_method(
+            "PUT", "/v1/container/manifest", request_write_handle)
+
+        self.storage_service.add_method(
+            "PUT", "/v1/container/manifest/segments/\d+", request_write_handle)
+
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("manifest")
+        segment_writer = SegmentWriter.with_segment_size(4)
+        writer = yield obj.upload_stream(
+            mimetype="text/html", writer=segment_writer)
+        yield writer.write("abe")
+        yield writer.write(" lincoln")
+        yield writer.write(" wins")
+        result = yield writer.finish()
+        self.assertEqual("success", result["status"])
+
+        expected = [
+            ("abe ", "/container/manifest/segments/000001"),
+            ("linc", "/container/manifest/segments/000002"),
+            ("oln ", "/container/manifest/segments/000003"),
+            ("wins", "/container/manifest/segments/000004")
+        ]
+
+        for content, segment_path in expected:
+            request = self.storage_service.assert_requested(
+                "PUT", "/v1{}".format(segment_path),
+                headers={"X-Auth-Token": "TOKEN"})
+            self.assertEqual(content, request.body)
+
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/manifest",
+            headers={"X-Auth-Token": "TOKEN"})
+        self.assertEqual("put", request.arguments["multipart-manifest"][0])
+        self.assertEqual("text/html", request.headers["Content-type"])
+
+        body = json.loads(request.body)
+        self.assertEqual(4, len(body))
+
+        for i in range(len(body)):
+            segment_info = body[i]
+            expected_body, expected_path = expected[i]
+            expected_etag = hashlib.md5(expected_body).hexdigest()
+            self.assertEqual(expected_path, segment_info["path"])
+            self.assertEqual(expected_etag, segment_info["etag"])
+            self.assertEqual(4, segment_info["size_bytes"])
