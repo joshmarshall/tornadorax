@@ -178,16 +178,16 @@ class SegmentWriter(object):
         result = yield segment.finish()
         # verify and retry
         self.segments[-1]["etag"] = result["md5sum"]
-        self.segments[-1]["size_bytes"] = len(self.segment_data)
+        self.segments[-1]["size_bytes"] = result["length"]
         self.md5sum.update(result["md5sum"])
         raise gen.Return(result)
 
     @gen.coroutine
     def finish(self):
-        if self.segment_data:
-            yield self.current_segment.write(self.segment_data)
-
-        yield self.close_segment(self.current_segment)
+        if self.current_segment:
+            if self.segment_data:
+                yield self.current_segment.write(self.segment_data)
+            yield self.close_segment(self.current_segment)
 
         body = json.dumps(self.segments)
         manifest_url = self.url + "?multipart-manifest=put"

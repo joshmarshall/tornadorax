@@ -144,3 +144,48 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
             self.assertEqual(expected_path, segment_info["path"])
             self.assertEqual(expected_etag, segment_info["etag"])
             self.assertEqual(4, segment_info["size_bytes"])
+
+    @gen_test
+    def test_upload_stream_allows_custom_segments(self):
+
+        def request_write_handle(handler):
+            handler.set_status(201)
+            handler.set_header(
+                "ETag", hashlib.md5(handler.request.body).hexdigest())
+            handler.finish()
+
+        self.storage_service.add_method(
+            "PUT", "/v1/container/manifest", request_write_handle)
+
+        self.storage_service.add_method(
+            "PUT", "/v1/container/manifest/segments/\d+", request_write_handle)
+
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("manifest")
+        # bad segment size so we can ensure it's not using it
+        segment_writer = SegmentWriter.with_segment_size(1)
+        writer = yield obj.upload_stream(
+            mimetype="text/html", writer=segment_writer)
+
+        segment1 = writer.create_segment()
+        yield segment1.write("foo")
+        yield segment1.write("bar")
+        yield segment1.write("one")
+        yield writer.close_segment(segment1)
+        segment2 = writer.create_segment()
+        yield segment2.write("foobar2")
+        yield writer.close_segment(segment2)
+        result = yield writer.finish()
+
+        self.assertEqual("success", result["status"])
+
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/manifest/segments/000001")
+        self.assertEqual("foobarone", request.body)
+
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/manifest/segments/000002")
+        self.assertEqual("foobar2", request.body)
+
+    # Need to add tests that verify etags, retry manifests, etc.
