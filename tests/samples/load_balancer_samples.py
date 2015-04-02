@@ -77,3 +77,31 @@ CREATE_RESPONSE = {
         }
     }
 }
+
+GET_RESPONSE = {
+    "loadBalancer": {
+        "name": "a-new-loadbalancer",
+        "id": 3,
+        "protocol": "HTTP",
+        "halfClosed": "true",
+        "port": 80,
+        "algorithm": "RANDOM",
+        "status": "BUILD",
+        "timeout": 30,
+        "cluster": {
+            "name": "cluster1"
+        },
+        "nodes": [],
+        "virtualIps": [
+            {
+                "address": "206.10.10.210",
+                "id": 39,
+                "type": "PUBLIC",
+                "ipVersion": "IPV4"
+            }
+        ],
+        "connectionLogging": {
+            "enabled": False
+        }
+    }
+}
