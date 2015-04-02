@@ -12,7 +12,7 @@ setup(
     description="Tornado wrapper for OpenStack services",
     author='Josh Marshall',
     author_email='catchjosh@gmail.com',
-    url="http://github.com/joshmarshall/testnado/",
+    url="http://github.com/joshmarshall/tornadorax/",
     license="http://www.apache.org/licenses/LICENSE-2.0",
     packages=find_packages(exclude=["tests", "dist"]),
     install_requires=["tornado"]
