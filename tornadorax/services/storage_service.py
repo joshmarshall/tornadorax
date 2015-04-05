@@ -115,20 +115,24 @@ class BodyWriter(object):
         })
 
 
+# 1GB default segment size
+DEFAULT_SEGMENT_SIZE = 1024 * 1024 * 1024
+
+
 class SegmentWriter(object):
 
     @classmethod
-    def with_segment_size(cls, chunk_size):
+    def with_segment_size(cls, segment_size):
         def chunk_wrapper(*args, **kwargs):
-            kwargs.setdefault("chunk_size", chunk_size)
+            kwargs.setdefault("segment_size", segment_size)
             return cls(*args, **kwargs)
         return chunk_wrapper
 
     def __init__(
             self, url, container, object_name, token, mimetype, ioloop,
-            content_length, chunk_size):
+            content_length, segment_size=DEFAULT_SEGMENT_SIZE):
         self.url = url
-        self.chunk_size = chunk_size
+        self.segment_size = segment_size
         self.container = container
         self.object_name = object_name
         self.token = token
@@ -138,14 +142,26 @@ class SegmentWriter(object):
         self.ioloop = ioloop
         self.md5sum = hashlib.md5()
         self.segments = []
+        self.segment_indexes = {}
         self.current_segment_number = 0
         self.current_segment = None
 
-    def create_segment(self):
-        self.current_segment_number += 1
-        segment_name = "segments/%06d" % (self.current_segment_number)
+    def create_segment(self, segment_name=None):
+        if not segment_name:
+            self.current_segment_number += 1
+            segment_name = "%06d" % (self.current_segment_number)
+
+        segment_name = "segments/{}".format(segment_name)
+        segment_url = "{0}/{1}".format(self.url, segment_name)
+
+        segment = BodyWriter(
+            segment_url, self.container, self.object_name, self.token,
+            "application/video-segment", self.ioloop, content_length=0)
+
         segment_path = "/{0}/{1}/{2}".format(
             self.container, self.object_name, segment_name)
+
+        self.segment_indexes[id(segment)] = len(self.segments)
 
         self.segments.append({
             "path": segment_path,
@@ -153,10 +169,7 @@ class SegmentWriter(object):
             "size_bytes": 0
         })
 
-        segment_url = "{0}/{1}".format(self.url, segment_name)
-        return BodyWriter(
-            segment_url, self.container, self.object_name, self.token,
-            "application/video-segment", self.ioloop, content_length=0)
+        return segment
 
     @gen.coroutine
     def write(self, data):
@@ -165,9 +178,9 @@ class SegmentWriter(object):
 
         self.segment_data += data
 
-        while len(self.segment_data) > self.chunk_size:
-            extra_bytes = self.segment_data[self.chunk_size:]
-            self.segment_data = self.segment_data[:self.chunk_size]
+        while len(self.segment_data) > self.segment_size:
+            extra_bytes = self.segment_data[self.segment_size:]
+            self.segment_data = self.segment_data[:self.segment_size]
             yield self.current_segment.write(self.segment_data)
             yield self.close_segment(self.current_segment)
             self.current_segment = self.create_segment()
@@ -176,21 +189,19 @@ class SegmentWriter(object):
     @gen.coroutine
     def close_segment(self, segment):
         result = yield segment.finish()
-        # verify and retry
-        self.segments[-1]["etag"] = result["md5sum"]
-        self.segments[-1]["size_bytes"] = result["length"]
+        # TODO: verify and retry
+        segment_index = self.segment_indexes[id(segment)]
+        self.segments[segment_index]["etag"] = result["md5sum"]
+        self.segments[segment_index]["size_bytes"] = result["length"]
         self.md5sum.update(result["md5sum"])
         raise gen.Return(result)
 
     @gen.coroutine
-    def finish(self):
+    def finish(self, dynamic=False):
         if self.current_segment:
             if self.segment_data:
                 yield self.current_segment.write(self.segment_data)
             yield self.close_segment(self.current_segment)
-
-        body = json.dumps(self.segments)
-        manifest_url = self.url + "?multipart-manifest=put"
 
         client = AsyncHTTPClient(io_loop=self.ioloop)
 
@@ -199,10 +210,20 @@ class SegmentWriter(object):
             "Content-type": self.mimetype
         }
 
+        body = json.dumps(self.segments)
+        manifest_url = self.url + "?multipart-manifest=put"
+
+        if dynamic:
+            # much simpler, but eventually consistent and no explicitness
+            headers["X-Object-Manifest"] = "{}/{}/segments".format(
+                self.container, self.object_name)
+            body = ""
+            manifest_url = self.url
+
         response = yield client.fetch(
             manifest_url, method="PUT", body=body, headers=headers)
 
-        # verify and retry
+        # TODO: verify and retry
 
         raise gen.Return({
             "etag": response.headers["Etag"],

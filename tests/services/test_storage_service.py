@@ -13,19 +13,15 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
 
     def setUp(self):
         super(TestStorage, self).setUp()
-
-        self.object_write_requests = []
-
-        def object_write_handle(handler):
-            request = handler.request
-            self.object_write_requests.append(request)
-            handler.set_status(201)
-            handler.write("")
-            handler.set_header("ETag", hashlib.md5(request.body).hexdigest())
-
         self.storage_service = self.add_service()
         self.storage_service.add_method(
             "PUT", "/v1/container/object", object_write_handle)
+
+        self.storage_service.add_method(
+            "PUT", "/v1/container/manifest", object_write_handle)
+
+        self.storage_service.add_method(
+            "PUT", "/v1/container/manifest/segments/\d+", object_write_handle)
 
         self.client = StorageService(
             self.storage_service.url("/v1"), fetch_token=fetch_token,
@@ -46,21 +42,17 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         self.assertEqual(8, result["length"])
         self.assertEqual(hashlib.md5("CONTENTS").hexdigest(), result["md5sum"])
 
-        self.assertEqual(1, len(self.object_write_requests))
-        request = self.object_write_requests[0]
-        self.assertEqual("TOKEN", request.headers["X-Auth-Token"])
-        self.assertEqual("text/html", request.headers["Content-type"])
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/object", headers={
+                "X-Auth-Token": "TOKEN", "Content-type": "text/html"})
+
         self.assertEqual("CONTENTS", request.body)
 
     @gen_test
     def test_upload_stream_raises_error(self):
 
-        def object_write_handle(handler):
-            handler.set_status(401)
-            handler.write("ERROR")
-
         self.storage_service.add_method(
-            "PUT", "/v1/container/object", object_write_handle)
+            "PUT", "/v1/container/object", object_write_error_handle)
 
         self.start_services()
         container = yield self.client.fetch_container("container")
@@ -83,25 +75,14 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         yield writer.write("CONTENTS")
         yield writer.finish()
 
-        request = self.object_write_requests[0]
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/object")
         self.assertEqual("8", request.headers["Content-length"])
 
     @gen_test
     def test_upload_stream_allows_segmentation(self):
         # big, nasty segment test. should be broken up later, especially
         # with retry, etc.
-
-        def request_write_handle(handler):
-            handler.set_status(201)
-            handler.set_header(
-                "ETag", hashlib.md5(handler.request.body).hexdigest())
-            handler.finish()
-
-        self.storage_service.add_method(
-            "PUT", "/v1/container/manifest", request_write_handle)
-
-        self.storage_service.add_method(
-            "PUT", "/v1/container/manifest/segments/\d+", request_write_handle)
 
         self.start_services()
         container = yield self.client.fetch_container("container")
@@ -147,19 +128,6 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
 
     @gen_test
     def test_upload_stream_allows_custom_segments(self):
-
-        def request_write_handle(handler):
-            handler.set_status(201)
-            handler.set_header(
-                "ETag", hashlib.md5(handler.request.body).hexdigest())
-            handler.finish()
-
-        self.storage_service.add_method(
-            "PUT", "/v1/container/manifest", request_write_handle)
-
-        self.storage_service.add_method(
-            "PUT", "/v1/container/manifest/segments/\d+", request_write_handle)
-
         self.start_services()
         container = yield self.client.fetch_container("container")
         obj = yield container.fetch_object("manifest")
@@ -188,4 +156,53 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
             "PUT", "/v1/container/manifest/segments/000002")
         self.assertEqual("foobar2", request.body)
 
+    @gen_test
+    def test_upload_segment_allows_dynamic_segments(self):
+        self.start_services()
+
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("manifest")
+
+        writer = yield obj.upload_stream(
+            mimetype="text/html", writer=SegmentWriter)
+
+        segment1 = writer.create_segment("001")
+        yield segment1.write("foo")
+        yield writer.close_segment(segment1)
+
+        segment2 = writer.create_segment("005")
+        yield segment2.write("bar")
+        yield writer.close_segment(segment2)
+
+        result = yield writer.finish(dynamic=True)
+        self.assertEqual("success", result["status"])
+
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/manifest/segments/001")
+        self.assertEqual("foo", request.body)
+
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/manifest/segments/005")
+        self.assertEqual("bar", request.body)
+
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/manifest")
+        self.assertEqual(
+            "container/manifest/segments",
+            request.headers["X-Object-Manifest"])
+        self.assertEqual("text/html", request.headers["Content-type"])
+        self.assertEqual("", request.body)
+
     # Need to add tests that verify etags, retry manifests, etc.
+
+
+def object_write_handle(handler):
+    handler.set_status(201)
+    handler.set_header(
+        "ETag", hashlib.md5(handler.request.body).hexdigest())
+    handler.finish()
+
+
+def object_write_error_handle(handler):
+    handler.set_status(401)
+    handler.write("ERROR")

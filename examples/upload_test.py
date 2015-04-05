@@ -1,8 +1,12 @@
+import os
+import sys
+
+PATH = os.path.abspath(os.path.join(os.path.basename(__file__), "../"))
+sys.path.insert(0, PATH)
+
 import argparse
 import mimetypes
-import os
 import re
-import sys
 
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -39,18 +43,7 @@ def get_credentials(service):
 
 
 @gen.coroutine
-def upload(service, container, file_path, ioloop, segment_size):
-    mimetype, _ = mimetypes.guess_type(file_path)
-    base_name = re.sub("[^a-zA-Z\-_\.]", "_", os.path.basename(file_path))
-    identity_url, credentials = get_credentials(service)
-    client = IdentityClient(identity_url, credentials, ioloop)
-    result = yield client.authorize()
-    if not result["status"] == "success":
-        raise Exception("Issue authorizing: {0}".format(result))
-
-    service = client.build_service("object-store")
-    container = yield service.fetch_container(container)
-    obj = yield container.fetch_object(base_name)
+def static_stream(obj, file_path, mimetype, segment_size):
     size = os.path.getsize(file_path)
     transferred = 0
     writer_type = SegmentWriter.with_segment_size(segment_size)
@@ -70,7 +63,49 @@ def upload(service, container, file_path, ioloop, segment_size):
     sys.stdout.write("\n")
     sys.stdout.flush()
     result = yield writer.finish()
-    print result["status"]
+    raise gen.Return(result)
+
+
+@gen.coroutine
+def dynamic_stream(obj, file_path, mimetype, segment_size):
+    size = os.path.getsize(file_path)
+    transferred = 0
+    writer = yield obj.upload_stream(
+        mimetype, content_length=size, writer=SegmentWriter)
+    progress(0)
+    with open(file_path, "rb") as fp:
+        while True:
+            data = fp.read(segment_size)
+            if not data:
+                break
+            segment = writer.create_segment("%014d" % transferred)
+            yield segment.write(data)
+            yield writer.close_segment(segment)
+            percent = float(transferred) / size
+            progress(percent)
+            transferred += len(data)
+    progress(1)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    result = yield writer.finish(dynamic=True)
+    raise gen.Return(result)
+
+
+@gen.coroutine
+def upload(service, container, file_path, ioloop, segment_size):
+    mimetype, _ = mimetypes.guess_type(file_path)
+    base_name = re.sub("[^a-zA-Z\-_\.]", "_", os.path.basename(file_path))
+    identity_url, credentials = get_credentials(service)
+    client = IdentityClient(identity_url, credentials, ioloop)
+    result = yield client.authorize()
+    if not result["status"] == "success":
+        raise Exception("Issue authorizing: {0}".format(result))
+
+    service = client.build_service("object-store")
+    container = yield service.fetch_container(container)
+    obj = yield container.fetch_object(base_name)
+    result = yield dynamic_stream(obj, file_path, mimetype, segment_size)
+    print result
 
 
 SPINNERS = ["\\", "|", "/", "-"]
