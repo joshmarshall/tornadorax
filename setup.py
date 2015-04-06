@@ -15,5 +15,5 @@ setup(
     url="http://github.com/joshmarshall/tornadorax/",
     license="http://www.apache.org/licenses/LICENSE-2.0",
     packages=find_packages(exclude=["tests", "dist"]),
-    install_requires=["tornado"]
+    install_requires=["tornado", "python-dateutil"]
 )

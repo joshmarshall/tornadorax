@@ -1,7 +1,9 @@
+import calendar
 import json
 import logging
 import time
 
+import dateutil.parser
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
@@ -21,8 +23,17 @@ class IdentityClient(object):
         self.ioloop = ioloop
         self.service_catalog = None
         self.token = None
-        self.token_expires = 0
+        self._token_expires = 0
         self.default_region = None
+
+    @property
+    def token_expires(self):
+        return self._token_expires
+
+    @token_expires.setter
+    def token_expires(self, expiration_string):
+        self._token_expires = calendar.timegm(
+            dateutil.parser.parse(expiration_string).utctimetuple())
 
     @gen.coroutine
     def fetch_token(self):

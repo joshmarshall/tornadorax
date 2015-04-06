@@ -1,7 +1,14 @@
-RAX_AUTH_DATA = {
+import datetime
+
+
+FUTURE_EXPIRATION = datetime.datetime.utcnow() + \
+    datetime.timedelta(days=60)
+
+
+KEYSTONE_RESPONSE = {
     "access": {
         "token": {
-            "expires": "2015-06-12T22:51:02.000-06:00",
+            "expires": FUTURE_EXPIRATION.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "id": "TOKEN"
         },
         "serviceCatalog": [

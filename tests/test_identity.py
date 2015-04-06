@@ -1,3 +1,4 @@
+import datetime
 import json
 import time
 
@@ -15,7 +16,7 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
 
     def setUp(self):
         super(TestIdentity, self).setUp()
-        self.auth_data = identity_samples.RAX_AUTH_DATA.copy()
+        self.auth_data = identity_samples.KEYSTONE_RESPONSE.copy()
 
         def id_handle(handler):
             self.identity_requests.append(handler.request)
@@ -46,8 +47,8 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
         self.assertEqual("success", result["status"])
         self.assertEqual("TOKEN", result["token"])
 
-        self.assertEqual(1, len(self.identity_requests))
-        request = self.identity_requests[0]
+        request = self.identity_service.assert_requested(
+            "POST", "/v2.0/tokens")
         self.assertEqual("application/json", request.headers["Content-type"])
         body = json.loads(request.body)
         self.assertEqual(body["auth"], self.credentials)
@@ -70,10 +71,11 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
     @gen_test
     def test_authorize_retries_on_500s(self):
         responses = [(500, ""), (501, ""), (503, ""), (201, self.auth_data)]
+        identity_requests = []
 
         def id_handle(handler):
             status, body = responses.pop(0)
-            self.identity_requests.append(time.time())
+            identity_requests.append(time.time())
             handler.set_status(status)
             handler.write(body)
 
@@ -86,7 +88,7 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
 
         self.assertEqual("success", result["status"])
         self.assertEqual("TOKEN", result["token"])
-        self.assertEqual(4, len(self.identity_requests))
+        self.assertEqual(4, len(identity_requests))
 
     @gen_test
     def test_build_service_returns_properly_configured_instance(self):
@@ -147,7 +149,7 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
         self.start_services()
         result = yield self.client.fetch_token()
         self.assertEqual("TOKEN", result)
-        self.assertEqual(1, len(self.identity_requests))
+        self.identity_service.assert_requested("POST", "/v2.0/tokens")
 
     @gen_test
     def test_fetch_token_authorizes_if_token_expired(self):
@@ -157,7 +159,10 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
         # this is a bit invasive, playing with this attribute.
         # setting it to 55 seconds ahead since we give a minute
         # of leeway for (slight) clock skew
-        self.client.token_expires = time.time() + 55
+        expiration = datetime.datetime.utcfromtimestamp(time.time() + 55)
+        self.client.token_expires = expiration.strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        # self.client.token_expires = time.time() + 55
         result = yield self.client.fetch_token()
         self.assertEqual("TOKEN", result)
         self.assertEqual(1, len(self.identity_requests))
