@@ -6,6 +6,9 @@ from tornado.concurrent import Future
 from tornado.httpclient import AsyncHTTPClient
 
 
+CHUNK_SIZE = 64 * 1024
+
+
 class StorageService(object):
 
     def __init__(self, service_url, fetch_token, ioloop):
@@ -138,12 +141,12 @@ class SegmentWriter(object):
         self.token = token
         self.mimetype = mimetype
         self.content_length = content_length
-        self.segment_data = ""
         self.ioloop = ioloop
         self.md5sum = hashlib.md5()
         self.segments = []
         self.segment_indexes = {}
         self.current_segment_number = 0
+        self.current_segment_size = 0
         self.current_segment = None
 
     def create_segment(self, segment_name=None):
@@ -175,16 +178,29 @@ class SegmentWriter(object):
     def write(self, data):
         if not self.current_segment:
             self.current_segment = self.create_segment()
+            self.current_segment_size = 0
 
-        self.segment_data += data
+        chunk_size = \
+            CHUNK_SIZE if CHUNK_SIZE < self.segment_size else self.segment_size
 
-        while len(self.segment_data) > self.segment_size:
-            extra_bytes = self.segment_data[self.segment_size:]
-            self.segment_data = self.segment_data[:self.segment_size]
-            yield self.current_segment.write(self.segment_data)
+        if self.segment_size < self.current_segment_size + chunk_size:
+            chunk_size = self.segment_size - self.current_segment_size
+
+        if len(data) < chunk_size:
+            chunk_size = len(data)
+
+        yield self.current_segment.write(data[:chunk_size])
+
+        remaining_data = data[chunk_size:]
+        self.current_segment_size += chunk_size
+
+        if self.current_segment_size >= self.segment_size:
             yield self.close_segment(self.current_segment)
-            self.current_segment = self.create_segment()
-            self.segment_data = extra_bytes
+            self.current_segment = None
+            self.current_segment_size = 0
+
+        if remaining_data:
+            yield self.write(remaining_data)
 
     @gen.coroutine
     def close_segment(self, segment):
@@ -199,8 +215,6 @@ class SegmentWriter(object):
     @gen.coroutine
     def finish(self, dynamic=False):
         if self.current_segment:
-            if self.segment_data:
-                yield self.current_segment.write(self.segment_data)
             yield self.close_segment(self.current_segment)
 
         client = AsyncHTTPClient(io_loop=self.ioloop)
