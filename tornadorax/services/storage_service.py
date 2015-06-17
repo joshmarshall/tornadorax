@@ -115,7 +115,6 @@ class StorageObject(object):
         }
 
         def response_callback(response_future):
-            # should probably verify the request worked... :)
             response = response_future.result()
             if response.code >= 400:
                 exception = StreamError(
