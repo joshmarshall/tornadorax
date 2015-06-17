@@ -7,6 +7,8 @@ from tornado.httpclient import AsyncHTTPClient
 
 
 CHUNK_SIZE = 64 * 1024
+# sentinel value
+READ_DONE = dict()
 
 
 class StorageService(object):
@@ -52,6 +54,39 @@ class StorageObject(object):
         self.client = AsyncHTTPClient(io_loop=ioloop)
 
     @gen.coroutine
+    def info(self):
+        token = yield self.fetch_token()
+        headers = {"X-Auth-Token": token}
+        response = yield self.client.fetch(
+            self.object_url, method="HEAD", headers=headers, raise_error=False)
+        if response.code >= 400:
+            raise gen.Return({
+                "status": "error",
+                "code": response.code,
+                "body": response.body
+            })
+        metadata = {}
+        values = {}
+        for header, value in response.headers.items():
+            if not header.startswith("X-"):
+                continue
+            if header.startswith("X-Object-Meta-"):
+                name = header.split("X-Object-Meta-")[1].lower()
+                metadata[name] = value
+            else:
+                values[header.lower()] = value
+
+        values.update({
+            "status": "success",
+            "metadata": metadata,
+            "type": response.headers["Content-type"],
+            "length": int(response.headers["Content-length"]),
+            "etag": response.headers["Etag"]
+        })
+
+        raise gen.Return(values)
+
+    @gen.coroutine
     def upload_stream(self, mimetype, writer=None, content_length=0):
         token = yield self.fetch_token()
         writer = writer or BodyWriter
@@ -59,6 +94,67 @@ class StorageObject(object):
             self.object_url, self.container, self.name, mimetype=mimetype,
             token=token, ioloop=self.ioloop, content_length=content_length)
         raise gen.Return(writer_instance)
+
+    @gen.coroutine
+    def read(self, start=0, end=0):
+        body = ""
+        reader = yield self.read_stream(start=start, end=end)
+        for read_chunk in reader:
+            body += yield read_chunk
+        raise gen.Return(body)
+
+    @gen.coroutine
+    def read_stream(self, start=0, end=0):
+        token = yield self.fetch_token()
+        if end == 0:
+            end = ""
+
+        headers = {
+            "X-Auth-Token": token,
+            "Range": "bytes={0}-{1}".format(start, end)
+        }
+
+        def response_callback(response_future):
+            # should probably verify the request worked... :)
+            response = response_future.result()
+            if response.code >= 400:
+                exception = StreamError(
+                    "Error retrieving object: {0}".format(response.code))
+                wait_futures.append(Future())
+                wait_futures[0].set_exception(exception)
+            else:
+                wait_futures.pop(0).set_result("")
+            chunk_futures.append(READ_DONE)
+
+        chunk_futures = [Future()]
+        wait_futures = []
+
+        def body_callback(chunk):
+            chunk_futures.append(Future())
+            if len(wait_futures) == 0:
+                future = chunk_futures[-1]
+            else:
+                future = wait_futures.pop(0)
+            future.set_result(chunk)
+
+        result_future = self.client.fetch(
+            self.object_url, headers=headers,
+            streaming_callback=body_callback, raise_error=False)
+        result_future.add_done_callback(response_callback)
+
+        def iterate():
+            while True:
+                if len(chunk_futures) == 0:
+                    raise StreamError("Previous chunk not consumed.")
+                future = chunk_futures.pop(0)
+                if future is READ_DONE:
+                    break
+                wait_futures.append(future)
+                yield future
+
+            raise StopIteration()
+
+        raise gen.Return(iterate())
 
 
 class BodyWriter(object):
@@ -245,3 +341,7 @@ class SegmentWriter(object):
             "md5sum": self.md5sum.hexdigest(),
             "length": sum([s["size_bytes"] for s in self.segments])
         })
+
+
+class StreamError(Exception):
+    pass

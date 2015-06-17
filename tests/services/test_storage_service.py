@@ -1,5 +1,7 @@
 import json
 import hashlib
+import random
+import string
 
 from tornado.testing import AsyncTestCase, gen_test
 from testnado.service_case_helpers import ServiceCaseHelpers
@@ -7,6 +9,10 @@ from testnado.service_case_helpers import ServiceCaseHelpers
 from tests.helpers.service_helpers import fetch_token
 from tornadorax.services.storage_service import StorageService
 from tornadorax.services.storage_service import SegmentWriter
+from tornadorax.services.storage_service import StreamError
+
+
+OBJECT_BODY = "".join([random.choice(string.letters) for i in range(2048)])
 
 
 class TestStorage(ServiceCaseHelpers, AsyncTestCase):
@@ -16,6 +22,12 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         self.storage_service = self.add_service()
         self.storage_service.add_method(
             "PUT", "/v1/container/object", object_write_handle)
+
+        self.storage_service.add_method(
+            "GET", "/v1/container/object", object_read_handle)
+
+        self.storage_service.add_method(
+            "HEAD", "/v1/container/object", object_info_handle)
 
         self.storage_service.add_method(
             "PUT", "/v1/container/manifest", object_write_handle)
@@ -195,6 +207,73 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
 
     # Need to add tests that verify etags, retry manifests, etc.
 
+    @gen_test
+    def test_read_chunk(self):
+        self.start_services()
+
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object")
+        chunk1 = yield obj.read(0, 1023)
+        chunk2 = yield obj.read(1024)
+        total = yield obj.read()
+        self.assertEqual(chunk1, OBJECT_BODY[:1024])
+        self.assertEqual(chunk2, OBJECT_BODY[1024:])
+        self.assertEqual(OBJECT_BODY, total)
+
+    @gen_test
+    def test_read_stream_returns_body_in_chunks(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object")
+        reader = yield obj.read_stream()
+        body = ""
+        for read_chunk in reader:
+            chunk = yield read_chunk
+            body += chunk
+        self.assertEqual(OBJECT_BODY, body)
+
+    @gen_test
+    def test_read_stream_raises_with_uncomsumed_chunk(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object")
+        reader = yield obj.read_stream()
+        reader.next()
+        with self.assertRaises(StreamError):
+            reader.next()
+
+    @gen_test
+    def test_read_stream_raises_with_bad_response(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object2")
+        reader = yield obj.read_stream()
+        with self.assertRaises(StreamError):
+            for read_chunk in reader:
+                yield read_chunk
+
+    @gen_test
+    def test_info_returns_metadata_about_object(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object")
+        info = yield obj.info()
+        self.assertEqual("success", info["status"])
+        self.assertEqual({"foo": "foo", "bar": "bar"}, info["metadata"])
+        self.assertEqual("value", info["x-foobar"])
+        self.assertEqual(1024, info["length"])
+        self.assertEqual("text/plain", info["type"])
+        self.assertEqual("md5sum", info["etag"])
+
+    @gen_test
+    def test_info_returns_error_with_bad_response(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object2")
+        info = yield obj.info()
+        self.assertEqual("error", info["status"])
+        self.assertEqual(404, info["code"])
+
 
 def object_write_handle(handler):
     handler.set_status(201)
@@ -206,3 +285,32 @@ def object_write_handle(handler):
 def object_write_error_handle(handler):
     handler.set_status(401)
     handler.write("ERROR")
+
+
+def object_read_handle(handler):
+    handler.set_status(200)
+    range_string = handler.request.headers.get("Range", "bytes=0-")
+    range_parts = range_string.split("=")[1].rsplit("-", 1)
+    start, end = range_parts
+    if not end:
+        end = len(OBJECT_BODY) - 1
+    start, end = (int(start), int(end) + 1)
+
+    for i in range(0, end-start, 1024):
+        offset = start + i
+        offset_end = offset + 1024 if end > offset + 1024 else end
+        handler.write(OBJECT_BODY[offset:offset_end])
+        handler.flush()
+
+    handler.finish()
+
+
+def object_info_handle(handler):
+    handler.set_status(200)
+    handler.set_header("X-Object-Meta-Foo", "foo")
+    handler.set_header("X-Object-Meta-Bar", "bar")
+    handler.set_header("Etag", "md5sum")
+    handler.set_header("Content-length", "1024")
+    handler.set_header("Content-type", "text/plain")
+    handler.set_header("X-Foobar", "value")
+    handler.finish()
