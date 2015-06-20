@@ -124,7 +124,8 @@ class StorageObject(object):
                 future = futures.pop(0)
                 future.set_exception(exception)
             else:
-                futures.pop(0).set_result("")
+                if futures:
+                    futures.pop(0).set_result("")
             chunks.append(READ_DONE)
 
         chunks = []
