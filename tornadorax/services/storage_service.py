@@ -116,25 +116,24 @@ class StorageObject(object):
 
         def response_callback(response_future):
             response = response_future.result()
+            future = futures.pop(0)
             if response.code >= 400:
                 exception = StreamError(
                     "Error retrieving object: {0}".format(response.code))
-                wait_futures.append(Future())
-                wait_futures[0].set_exception(exception)
+                future.set_exception(exception)
             else:
-                wait_futures.pop(0).set_result("")
-            chunk_futures.append(READ_DONE)
+                future.set_result("")
+            chunks.append(READ_DONE)
 
-        chunk_futures = [Future()]
-        wait_futures = []
+        chunks = []
+        futures = []
 
         def body_callback(chunk):
-            chunk_futures.append(Future())
-            if len(wait_futures) == 0:
-                future = chunk_futures[-1]
+            if futures:
+                future = futures.pop(0)
+                future.set_result(chunk)
             else:
-                future = wait_futures.pop(0)
-            future.set_result(chunk)
+                chunks.append(chunk)
 
         result_future = self.client.fetch(
             self.object_url, headers=headers,
@@ -142,16 +141,23 @@ class StorageObject(object):
         result_future.add_done_callback(response_callback)
 
         def iterate():
-            while True:
-                if len(chunk_futures) == 0:
-                    raise StreamError("Previous chunk not consumed.")
-                future = chunk_futures.pop(0)
-                if future is READ_DONE:
-                    break
-                wait_futures.append(future)
-                yield future
 
-            raise StopIteration()
+            while True:
+                future = Future()
+                if not chunks:
+                    if futures:
+                        raise StreamError("Previous future was not consumed.")
+                    futures.append(future)
+                    yield future
+                    continue
+
+                chunk = chunks.pop(0)
+
+                if chunk is READ_DONE:
+                    raise StopIteration()
+
+                future.set_result(chunk)
+                yield future
 
         raise gen.Return(iterate())
 
