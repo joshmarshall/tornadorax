@@ -116,13 +116,15 @@ class StorageObject(object):
 
         def response_callback(response_future):
             response = response_future.result()
-            future = futures.pop(0)
             if response.code >= 400:
                 exception = StreamError(
                     "Error retrieving object: {0}".format(response.code))
+                if not futures:
+                    raise exception
+                future = futures.pop(0)
                 future.set_exception(exception)
             else:
-                future.set_result("")
+                futures.pop(0).set_result("")
             chunks.append(READ_DONE)
 
         chunks = []
