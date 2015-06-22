@@ -1,4 +1,5 @@
 import json
+import logging
 import hashlib
 
 from tornado import gen
@@ -11,6 +12,9 @@ CHUNK_SIZE = 64 * 1024
 READ_DONE = dict()
 
 
+LOGGER = logging.getLogger("rax:storage")
+
+
 class StorageService(object):
 
     def __init__(self, service_url, fetch_token, ioloop):
@@ -20,6 +24,7 @@ class StorageService(object):
 
     @gen.coroutine
     def fetch_container(self, container_name):
+        LOGGER.debug("Fetching container {0}".format(container_name))
         container_url = "{0}/{1}".format(self.service_url, container_name)
         container = StorageContainer(
             container_url, container_name, self.fetch_token,
@@ -37,6 +42,7 @@ class StorageContainer(object):
 
     @gen.coroutine
     def fetch_object(self, object_name):
+        LOGGER.debug("Fetching object {0}".format(object_name))
         object_url = "{0}/{1}".format(self.container_url, object_name)
         storage_object = StorageObject(
             object_url, self.name, object_name, self.fetch_token, self.ioloop)
@@ -55,6 +61,7 @@ class StorageObject(object):
 
     @gen.coroutine
     def info(self):
+        LOGGER.debug("Fetching object info: {0}".format(self.object_url))
         token = yield self.fetch_token()
         headers = {"X-Auth-Token": token}
         response = yield self.client.fetch(
@@ -88,6 +95,7 @@ class StorageObject(object):
 
     @gen.coroutine
     def upload_stream(self, mimetype, writer=None, content_length=0):
+        LOGGER.debug("Creating upload stream for {0}".format(self.object_url))
         token = yield self.fetch_token()
         writer = writer or BodyWriter
         writer_instance = writer(
@@ -105,6 +113,7 @@ class StorageObject(object):
 
     @gen.coroutine
     def read_stream(self, start=0, end=0):
+        LOGGER.debug("Creating read stream {0}".format(self.object_url))
         token = yield self.fetch_token()
         if end == 0:
             end = ""
@@ -117,6 +126,8 @@ class StorageObject(object):
         def response_callback(response_future):
             response = response_future.result()
             if response.code >= 400:
+                LOGGER.debug("Error reading {0} ({1})".format(
+                    self.object_url, response.code))
                 exception = StreamError(
                     "Error retrieving object: {0}".format(response.code))
                 if not futures:
@@ -126,6 +137,7 @@ class StorageObject(object):
             else:
                 if futures:
                     futures.pop(0).set_result("")
+            LOGGER.debug("Finished reading {0}".format(self.object_url))
             chunks.append(READ_DONE)
 
         chunks = []
@@ -170,6 +182,7 @@ class BodyWriter(object):
     def __init__(
             self, url, container_name, object_name, token, mimetype,
             ioloop, content_length):
+        self.url = url
         self.content_length = content_length
         self.transferred_length = 0
         self.ioloop = ioloop
@@ -191,6 +204,7 @@ class BodyWriter(object):
 
     @gen.coroutine
     def __call__(self, write_function):
+        LOGGER.debug("Starting transfer to {0}".format(self.url))
         self.write_function = write_function
         self.initialized_future.set_result(None)
         yield self.finish_future
@@ -201,19 +215,27 @@ class BodyWriter(object):
         self.md5sum.update(data)
         self.transferred_length += len(data)
         yield self.write_function(data)
+        LOGGER.debug("Sent {0} to {1}".format(
+            self.transferred_length, self.url))
         raise gen.Return(len(data))
 
     @gen.coroutine
     def finish(self):
         self.finish_future.set_result(None)
+        LOGGER.debug("Closing file: {}".format(self.url))
+
         response = yield self.request_future
 
         if response.code not in range(200, 300):
+            LOGGER.debug("File transfer {0} failed: {1}".format(
+                self.url, response.code))
             raise gen.Return({
                 "status": "error",
                 "code": response.code,
                 "body": response.body
             })
+
+        LOGGER.debug("Finished file: {}".format(self.url))
 
         raise gen.Return({
             "status": "success",
@@ -229,20 +251,21 @@ DEFAULT_SEGMENT_SIZE = 1024 * 1024 * 1024
 class SegmentWriter(object):
 
     @classmethod
-    def with_segment_size(cls, segment_size):
+    def with_defaults(cls, **cls_kwargs):
         def chunk_wrapper(*args, **kwargs):
-            kwargs.setdefault("segment_size", segment_size)
+            kwargs.update(cls_kwargs)
             return cls(*args, **kwargs)
         return chunk_wrapper
 
     def __init__(
             self, url, container, object_name, token, mimetype, ioloop,
-            content_length, segment_size=DEFAULT_SEGMENT_SIZE):
+            content_length, segment_size=DEFAULT_SEGMENT_SIZE, dynamic=False):
         self.url = url
         self.segment_size = segment_size
         self.container = container
         self.object_name = object_name
         self.token = token
+        self.dynamic = dynamic
         self.mimetype = mimetype
         self.content_length = content_length
         self.ioloop = ioloop
@@ -260,6 +283,8 @@ class SegmentWriter(object):
 
         segment_name = "segments/{}".format(segment_name)
         segment_url = "{0}/{1}".format(self.url, segment_name)
+
+        LOGGER.debug("Creating new segment {0}".format(segment_url))
 
         segment = BodyWriter(
             segment_url, self.container, self.object_name, self.token,
@@ -317,7 +342,7 @@ class SegmentWriter(object):
         raise gen.Return(result)
 
     @gen.coroutine
-    def finish(self, dynamic=False):
+    def finish(self):
         if self.current_segment:
             yield self.close_segment(self.current_segment)
 
@@ -328,18 +353,26 @@ class SegmentWriter(object):
             "Content-type": self.mimetype
         }
 
-        body = json.dumps(self.segments)
-        manifest_url = self.url + "?multipart-manifest=put"
-
-        if dynamic:
-            # much simpler, but eventually consistent and no explicitness
+        if self.dynamic:
+            # dynamic manifests are much simpler, since they simply contain
+            # a pattern to match, but they are eventually consistent with
+            # updates and the segmentation is not explicit (meaning
+            # that extra / duplicate segments are possible).
             headers["X-Object-Manifest"] = "{}/{}/segments".format(
                 self.container, self.object_name)
             body = ""
             manifest_url = self.url
+        else:
+            # static manifests are more stable, since they include
+            # explicit information about the chunks, but they do have size
+            # limitations
+            body = json.dumps(self.segments)
+            manifest_url = self.url + "?multipart-manifest=put"
 
         response = yield client.fetch(
             manifest_url, method="PUT", body=body, headers=headers)
+
+        LOGGER.debug("Finished segmented delivery {0}".format(self.url))
 
         # TODO: verify and retry
 

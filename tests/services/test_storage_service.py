@@ -99,7 +99,7 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         self.start_services()
         container = yield self.client.fetch_container("container")
         obj = yield container.fetch_object("manifest")
-        segment_writer = SegmentWriter.with_segment_size(4)
+        segment_writer = SegmentWriter.with_defaults(segment_size=4)
         writer = yield obj.upload_stream(
             mimetype="text/html", writer=segment_writer)
         yield writer.write("abe")
@@ -144,7 +144,7 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         container = yield self.client.fetch_container("container")
         obj = yield container.fetch_object("manifest")
         # bad segment size so we can ensure it's not using it
-        segment_writer = SegmentWriter.with_segment_size(1)
+        segment_writer = SegmentWriter.with_defaults(segment_size=1)
         writer = yield obj.upload_stream(
             mimetype="text/html", writer=segment_writer)
 
@@ -176,7 +176,8 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         obj = yield container.fetch_object("manifest")
 
         writer = yield obj.upload_stream(
-            mimetype="text/html", writer=SegmentWriter)
+            mimetype="text/html",
+            writer=SegmentWriter.with_defaults(dynamic=True))
 
         segment1 = writer.create_segment("001")
         yield segment1.write("foo")
@@ -186,7 +187,7 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         yield segment2.write("bar")
         yield writer.close_segment(segment2)
 
-        result = yield writer.finish(dynamic=True)
+        result = yield writer.finish()
         self.assertEqual("success", result["status"])
 
         request = self.storage_service.assert_requested(
