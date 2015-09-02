@@ -1,21 +1,16 @@
 language: python
-
 python:
-    - "2.7"
-
+- '2.7'
 install:
-  - pip install -r requirements.txt
-  - pip install -r dev-requirements.txt
-  # because Travis broke its install...
-  - pip install twine
-
+- pip install -r requirements.txt
+- pip install -r dev-requirements.txt
+- pip install twine
 script: nosetests tests/ --with-coverage --cover-package=tornadorax
-
 deploy:
   provider: pypi
   user: joshmarshall
   password:
-    secure: b1y74CdU3xGMnynWHIpdHMd4uKoxnHYsmAKq+1bQEetj6uB8NyjnW4GBEHm5k18LeRHYMeHDw9rM2u1444w1PmJqBiA/Nqxb9d+83fIcRNKaOW5zNUpJa6aLqsDRUh5mWlVHmqNU/bhqQgI+mYnTE9yIOVRgy4GGQMtFh4kk0DfgMzCbMoDpaKNmbq72tx0q3czMbbFKe1gLLPZTLSmVlbO7Uu7l0VixNP4i8+HnAZUqiobmcmqprRaXZVvPa1OrmBuqEbkvrsWCyjJO5OFfl/gMWtP54v8KXA6XenWiMQx8FQ/7ruzQZYUA8YK+QXAG3dCF/B9OOMNDRaJlmBPV1eR3albH0PGkzVTz5xIHObp/XnR8L705g/JU0OyB1KVEuV+ViUUCovJP4nerAGYxG9TmGrQtZ25YSHAtapS5oMSs0qZBe7/NHlawaXVPYHKj9miVtkBaq/gGSwvlGehCcpXAwtQTjcX7mhvtVSVTh49ZcaCUPK7yxMeiVKqxxfOcf6Qff+PejOouV7jsCzISNXdiX2c3vm846mAp6liVLxinMZ+8sNTN/YcFav6ofs6cdz30UrLCvh7LDViWXmvF5Dadx+S6Tez/LS1SQlhv+tMcckz82otXL76pjq5KqmQ8csFV4GnF5WjBhndPxpTJ0rB/3WNfaGY8A1ulLTjDxtI=
+    secure: KO2EtEfr1JTcOga0/4fuNxSsPE/PFb6ZMY1OiG07uRasmEL4cebGcoVcKBOch4cOktarAzZ9Fndh9kIJIPXyTqKWLBm4988dZma4/O5m5hpaexuhJPXHKFU5dJtj5J6YFR9W8OFvqKD59M85bd+qlqTPVRqOzw/1/kW1EDHcNxU=
   on:
     tags: true
     repo: joshmarshall/tornadorax
