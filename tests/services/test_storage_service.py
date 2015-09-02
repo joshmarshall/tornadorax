@@ -61,6 +61,23 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         self.assertEqual("CONTENTS", request.body)
 
     @gen_test
+    def test_upload_stream_allows_extra_metadata(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object")
+        writer = yield obj.upload_stream(
+            mimetype="text/html", metadata={"foo": "bar", "cat": "mouse"})
+        yield writer.write("CONTENTS")
+        result = yield writer.finish()
+
+        self.assertEqual("success", result["status"])
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/object")
+
+        self.assertEqual("bar", request.headers["X-Object-Meta-foo"])
+        self.assertEqual("mouse", request.headers["X-Object-Meta-cat"])
+
+    @gen_test
     def test_upload_stream_raises_error(self):
 
         self.storage_service.add_method(
@@ -90,6 +107,23 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/object")
         self.assertEqual("8", request.headers["Content-length"])
+
+    @gen_test
+    def test_upload_stream_allows_custom_metadata(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("manifest")
+        segment_writer = SegmentWriter.with_defaults(segment_size=10)
+        writer = yield obj.upload_stream(
+            mimetype="text/html", writer=segment_writer,
+            metadata={"cat": "dog"})
+        yield writer.write("lincoln")
+        result = yield writer.finish()
+        self.assertEqual("success", result["status"])
+
+        request = self.storage_service.assert_requested(
+            "PUT", "/v1/container/manifest")
+        self.assertEqual("dog", request.headers["X-Object-Meta-cat"])
 
     @gen_test
     def test_upload_stream_allows_segmentation(self):

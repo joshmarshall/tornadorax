@@ -94,13 +94,20 @@ class StorageObject(object):
         raise gen.Return(values)
 
     @gen.coroutine
-    def upload_stream(self, mimetype, writer=None, content_length=0):
+    def upload_stream(
+            self, mimetype, writer=None, content_length=0, metadata=None):
         LOGGER.debug("Creating upload stream for {0}".format(self.object_url))
+        metadata = metadata or {}
+        extra_headers = dict([
+            ("X-Object-Meta-{0}".format(key), value)
+            for key, value in metadata.items()
+        ])
         token = yield self.fetch_token()
         writer = writer or BodyWriter
         writer_instance = writer(
             self.object_url, self.container, self.name, mimetype=mimetype,
-            token=token, ioloop=self.ioloop, content_length=content_length)
+            token=token, ioloop=self.ioloop, content_length=content_length,
+            extra_headers=extra_headers)
         raise gen.Return(writer_instance)
 
     @gen.coroutine
@@ -181,7 +188,7 @@ class BodyWriter(object):
 
     def __init__(
             self, url, container_name, object_name, token, mimetype,
-            ioloop, content_length):
+            ioloop, content_length, extra_headers=None):
         self.url = url
         self.content_length = content_length
         self.transferred_length = 0
@@ -191,6 +198,7 @@ class BodyWriter(object):
             "X-Auth-Token": token,
             "Content-type": mimetype
         }
+        self.headers.update(extra_headers or {})
 
         if content_length > 0:
             self.headers["Content-length"] = str(content_length)
@@ -259,7 +267,8 @@ class SegmentWriter(object):
 
     def __init__(
             self, url, container, object_name, token, mimetype, ioloop,
-            content_length, segment_size=DEFAULT_SEGMENT_SIZE, dynamic=False):
+            content_length, segment_size=DEFAULT_SEGMENT_SIZE, dynamic=False,
+            extra_headers=None):
         self.url = url
         self.segment_size = segment_size
         self.container = container
@@ -275,6 +284,7 @@ class SegmentWriter(object):
         self.current_segment_number = 0
         self.current_segment_size = 0
         self.current_segment = None
+        self.extra_headers = extra_headers or {}
 
     def create_segment(self, segment_name=None):
         if not segment_name:
@@ -352,6 +362,8 @@ class SegmentWriter(object):
             "X-Auth-Token": self.token,
             "Content-type": self.mimetype
         }
+
+        headers.update(self.extra_headers)
 
         if self.dynamic:
             # dynamic manifests are much simpler, since they simply contain

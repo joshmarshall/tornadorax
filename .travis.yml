@@ -8,3 +8,13 @@ install:
   - pip install -r dev-requirements.txt
 
 script: nosetests tests/ --with-coverage --cover-package=tornadorax
+
+deploy:
+  provider: pypi
+  user: joshmarshall
+  password:
+    secure: b1y74CdU3xGMnynWHIpdHMd4uKoxnHYsmAKq+1bQEetj6uB8NyjnW4GBEHm5k18LeRHYMeHDw9rM2u1444w1PmJqBiA/Nqxb9d+83fIcRNKaOW5zNUpJa6aLqsDRUh5mWlVHmqNU/bhqQgI+mYnTE9yIOVRgy4GGQMtFh4kk0DfgMzCbMoDpaKNmbq72tx0q3czMbbFKe1gLLPZTLSmVlbO7Uu7l0VixNP4i8+HnAZUqiobmcmqprRaXZVvPa1OrmBuqEbkvrsWCyjJO5OFfl/gMWtP54v8KXA6XenWiMQx8FQ/7ruzQZYUA8YK+QXAG3dCF/B9OOMNDRaJlmBPV1eR3albH0PGkzVTz5xIHObp/XnR8L705g/JU0OyB1KVEuV+ViUUCovJP4nerAGYxG9TmGrQtZ25YSHAtapS5oMSs0qZBe7/NHlawaXVPYHKj9miVtkBaq/gGSwvlGehCcpXAwtQTjcX7mhvtVSVTh49ZcaCUPK7yxMeiVKqxxfOcf6Qff+PejOouV7jsCzISNXdiX2c3vm846mAp6liVLxinMZ+8sNTN/YcFav6ofs6cdz30UrLCvh7LDViWXmvF5Dadx+S6Tez/LS1SQlhv+tMcckz82otXL76pjq5KqmQ8csFV4GnF5WjBhndPxpTJ0rB/3WNfaGY8A1ulLTjDxtI=
+  on:
+    tags: true
+    repo: joshmarshall/tornadorax
+    branch: master
