@@ -6,6 +6,8 @@ python:
 install:
   - pip install -r requirements.txt
   - pip install -r dev-requirements.txt
+  # because Travis broke its install...
+  - pip install twine
 
 script: nosetests tests/ --with-coverage --cover-package=tornadorax
 
