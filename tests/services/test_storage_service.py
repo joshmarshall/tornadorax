@@ -2,6 +2,7 @@ import json
 import hashlib
 import random
 import string
+import urlparse
 
 from tornado.testing import AsyncTestCase, gen_test
 from testnado.service_case_helpers import ServiceCaseHelpers
@@ -9,6 +10,7 @@ from testnado.service_case_helpers import ServiceCaseHelpers
 from tests.helpers.service_helpers import fetch_token
 from tornadorax.services.storage_service import StorageService
 from tornadorax.services.storage_service import SegmentWriter
+from tornadorax.services.storage_service import MissingTempURLKey
 from tornadorax.services.storage_service import StreamError
 
 
@@ -38,6 +40,40 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         self.client = StorageService(
             self.storage_service.url("/v1"), fetch_token=fetch_token,
             ioloop=self.io_loop)
+
+    @gen_test
+    def test_generate_tempurl_requires_key(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object")
+        with self.assertRaises(MissingTempURLKey):
+            obj.generate_tempurl(method="GET", expires=1000)
+
+    @gen_test
+    def test_generate_tempurl(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object", tempurl_key="foobar")
+        url = obj.generate_tempurl(method="GET", expires=1000)
+        url, params = url.split("?")
+        self.assertEqual(url, obj.object_url)
+        params = dict(urlparse.parse_qsl(params))
+        # pregenerated based on parameters and 'foobar' key
+        expected = "a42206ca0c6e654e46cd5e33b2b1f92aab81194d"
+        self.assertEqual("1000", params["temp_url_expires"])
+        self.assertEqual(expected, params["temp_url_sig"])
+
+    @gen_test
+    def test_generate_tempurl_forces_integer_expiration(self):
+        self.start_services()
+        container = yield self.client.fetch_container("container")
+        obj = yield container.fetch_object("object", tempurl_key="foobar")
+        url = obj.generate_tempurl(method="GET", expires=1000.112)
+        params = dict(urlparse.parse_qsl(url.split("?")[1]))
+        # pregenerated based on parameters and 'foobar' key
+        expected = "a42206ca0c6e654e46cd5e33b2b1f92aab81194d"
+        self.assertEqual("1000", params["temp_url_expires"])
+        self.assertEqual(expected, params["temp_url_sig"])
 
     @gen_test
     def test_upload_stream_stores_contents(self):
