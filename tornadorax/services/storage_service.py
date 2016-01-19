@@ -1,6 +1,9 @@
 import json
 import logging
 import hashlib
+import hmac
+import urllib
+import urlparse
 
 from tornado import gen
 from tornado.concurrent import Future
@@ -41,23 +44,40 @@ class StorageContainer(object):
         self.ioloop = ioloop
 
     @gen.coroutine
-    def fetch_object(self, object_name):
+    def fetch_object(self, object_name, tempurl_key=None):
         LOGGER.debug("Fetching object {0}".format(object_name))
         object_url = "{0}/{1}".format(self.container_url, object_name)
         storage_object = StorageObject(
-            object_url, self.name, object_name, self.fetch_token, self.ioloop)
+            object_url, self.name, object_name, self.fetch_token, self.ioloop,
+            tempurl_key=tempurl_key)
         raise gen.Return(storage_object)
 
 
 class StorageObject(object):
 
-    def __init__(self, url, container, object_name, fetch_token, ioloop):
+    def __init__(
+            self, url, container, object_name, fetch_token, ioloop,
+            tempurl_key=None):
         self.object_url = url
         self.container = container
         self.name = object_name
         self.fetch_token = fetch_token
         self.ioloop = ioloop
+        self.tempurl_key = tempurl_key
         self.client = AsyncHTTPClient(io_loop=ioloop)
+
+    def generate_tempurl(self, method, expires):
+        if not self.tempurl_key:
+            raise MissingTempURLKey("'tempurl_key' parameter not provided.")
+        expires = int(expires)
+        path = urlparse.urlparse(self.object_url).path
+        base = "{0}\n{1}\n{2}".format(method, expires, path)
+        signature = hmac.new(self.tempurl_key, base, hashlib.sha1).hexdigest()
+        params = urllib.urlencode({
+            "temp_url_expires": str(expires),
+            "temp_url_sig": signature
+        })
+        return self.object_url + "?" + params
 
     @gen.coroutine
     def info(self):
@@ -397,4 +417,8 @@ class SegmentWriter(object):
 
 
 class StreamError(Exception):
+    pass
+
+
+class MissingTempURLKey(Exception):
     pass
