@@ -9,7 +9,7 @@ install:
 - pip install -r requirements.txt
 - pip install -r dev-requirements.txt
 - pip install twine
-script: nosetests tests/ --with-coverage --cover-package=tornadorax
+script: nosetests tests/
 deploy:
   provider: pypi
   user: joshmarshall
