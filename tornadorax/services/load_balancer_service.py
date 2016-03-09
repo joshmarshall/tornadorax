@@ -20,7 +20,7 @@ class LoadBalancerService(object):
         response = yield self.client.fetch(
             url, headers={"X-Auth-Token": token}, raise_error=False)
         errors.check_service_response(response, "loadbalancers")
-        body = json.loads(response.body)
+        body = json.loads(response.body.decode("utf8"))
         load_balancers = []
         for lb_config in body["loadBalancers"]:
             load_balancers.append(
@@ -34,7 +34,7 @@ class LoadBalancerService(object):
         response = yield self.client.fetch(
             url, headers={"X-Auth-Token": token}, raise_error=False)
         errors.check_service_response(response, "loadbalancers")
-        body = json.loads(response.body)
+        body = json.loads(response.body.decode("utf8"))
         lb_config = body["loadBalancer"]
         lb = LoadBalancer(lb_config["id"], lb_config["name"])
         raise gen.Return(lb)
@@ -64,7 +64,7 @@ class LoadBalancerService(object):
         response = yield self.client.fetch(
             url, method="POST", headers=headers, body=body, raise_error=False)
         errors.check_service_response(response, "loadbalancers")
-        lb_config = json.loads(response.body)["loadBalancer"]
+        lb_config = json.loads(response.body.decode("utf8"))["loadBalancer"]
         lb = LoadBalancer.from_config(lb_config)
         raise gen.Return(lb)
 

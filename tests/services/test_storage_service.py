@@ -1,8 +1,16 @@
 import json
 import hashlib
 import random
-import string
-import urlparse
+
+try:
+    from string import letters
+except ImportError:
+    from string import ascii_letters as letters
+
+try:
+    import urlparse
+except ImportError:
+    import urllib.parse as urlparse
 
 from tornado.testing import AsyncTestCase, gen_test
 from testnado.service_case_helpers import ServiceCaseHelpers
@@ -14,7 +22,9 @@ from tornadorax.services.storage_service import MissingTempURLKey
 from tornadorax.services.storage_service import StreamError
 
 
-OBJECT_BODY = "".join([random.choice(string.letters) for i in range(2048)])
+OBJECT_BODY = "".join([
+    random.choice(letters) for i in range(2048)
+]).encode("utf8")
 
 
 class TestStorage(ServiceCaseHelpers, AsyncTestCase):
@@ -82,19 +92,20 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         container = yield self.client.fetch_container("container")
         obj = yield container.fetch_object("object")
         writer = yield obj.upload_stream(mimetype="text/html")
-        yield writer.write("CON")
-        yield writer.write("TENTS")
+        yield writer.write("CON".encode("ascii"))
+        yield writer.write("TENTS".encode("ascii"))
         result = yield writer.finish()
 
         self.assertEqual("success", result["status"])
         self.assertEqual(8, result["length"])
-        self.assertEqual(hashlib.md5("CONTENTS").hexdigest(), result["md5sum"])
+        self.assertEqual(
+            hashlib.md5(b"CONTENTS").hexdigest(), result["md5sum"])
 
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/object", headers={
                 "X-Auth-Token": "TOKEN", "Content-type": "text/html"})
 
-        self.assertEqual("CONTENTS", request.body)
+        self.assertEqual(b"CONTENTS", request.body)
 
     @gen_test
     def test_upload_stream_allows_extra_metadata(self):
@@ -103,7 +114,7 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         obj = yield container.fetch_object("object")
         writer = yield obj.upload_stream(
             mimetype="text/html", metadata={"foo": "bar", "cat": "mouse"})
-        yield writer.write("CONTENTS")
+        yield writer.write(b"CONTENTS")
         result = yield writer.finish()
 
         self.assertEqual("success", result["status"])
@@ -123,12 +134,12 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         container = yield self.client.fetch_container("container")
         obj = yield container.fetch_object("object")
         writer = yield obj.upload_stream(mimetype="text/html")
-        yield writer.write("CONTENTS")
+        yield writer.write(b"CONTENTS")
         result = yield writer.finish()
 
         self.assertEqual("error", result["status"])
         self.assertEqual(401, result["code"])
-        self.assertEqual("ERROR", result["body"])
+        self.assertEqual(b"ERROR", result["body"])
 
     @gen_test
     def test_upload_stream_allows_content_length(self):
@@ -137,7 +148,7 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         obj = yield container.fetch_object("object")
         writer = yield obj.upload_stream(
             mimetype="text/html", content_length=8)
-        yield writer.write("CONTENTS")
+        yield writer.write(b"CONTENTS")
         yield writer.finish()
 
         request = self.storage_service.assert_requested(
@@ -153,7 +164,7 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         writer = yield obj.upload_stream(
             mimetype="text/html", writer=segment_writer,
             metadata={"cat": "dog"})
-        yield writer.write("lincoln")
+        yield writer.write(b"lincoln")
         result = yield writer.finish()
         self.assertEqual("success", result["status"])
 
@@ -172,9 +183,9 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         segment_writer = SegmentWriter.with_defaults(segment_size=4)
         writer = yield obj.upload_stream(
             mimetype="text/html", writer=segment_writer)
-        yield writer.write("abe")
-        yield writer.write(" lincoln")
-        yield writer.write(" wins")
+        yield writer.write(b"abe")
+        yield writer.write(b" lincoln")
+        yield writer.write(b" wins")
         result = yield writer.finish()
         self.assertEqual("success", result["status"])
 
@@ -189,21 +200,22 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
             request = self.storage_service.assert_requested(
                 "PUT", "/v1{}".format(segment_path),
                 headers={"X-Auth-Token": "TOKEN"})
-            self.assertEqual(content, request.body)
+            self.assertEqual(content, request.body.decode("utf8"))
 
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/manifest",
             headers={"X-Auth-Token": "TOKEN"})
-        self.assertEqual("put", request.arguments["multipart-manifest"][0])
+        self.assertEqual(b"put", request.arguments["multipart-manifest"][0])
         self.assertEqual("text/html", request.headers["Content-type"])
 
-        body = json.loads(request.body)
+        body = json.loads(request.body.decode("utf8"))
         self.assertEqual(4, len(body))
 
         for i in range(len(body)):
             segment_info = body[i]
             expected_body, expected_path = expected[i]
-            expected_etag = hashlib.md5(expected_body).hexdigest()
+            expected_etag = hashlib.md5(
+                expected_body.encode("ascii")).hexdigest()
             self.assertEqual(expected_path, segment_info["path"])
             self.assertEqual(expected_etag, segment_info["etag"])
             self.assertEqual(4, segment_info["size_bytes"])
@@ -219,12 +231,12 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
             mimetype="text/html", writer=segment_writer)
 
         segment1 = writer.create_segment()
-        yield segment1.write("foo")
-        yield segment1.write("bar")
-        yield segment1.write("one")
+        yield segment1.write(b"foo")
+        yield segment1.write(b"bar")
+        yield segment1.write(b"one")
         yield writer.close_segment(segment1)
         segment2 = writer.create_segment()
-        yield segment2.write("foobar2")
+        yield segment2.write(b"foobar2")
         yield writer.close_segment(segment2)
         result = yield writer.finish()
 
@@ -232,11 +244,11 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
 
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/manifest/segments/000001")
-        self.assertEqual("foobarone", request.body)
+        self.assertEqual(b"foobarone", request.body)
 
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/manifest/segments/000002")
-        self.assertEqual("foobar2", request.body)
+        self.assertEqual(b"foobar2", request.body)
 
     @gen_test
     def test_upload_segment_allows_dynamic_segments(self):
@@ -250,11 +262,11 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
             writer=SegmentWriter.with_defaults(dynamic=True))
 
         segment1 = writer.create_segment("001")
-        yield segment1.write("foo")
+        yield segment1.write(b"foo")
         yield writer.close_segment(segment1)
 
         segment2 = writer.create_segment("005")
-        yield segment2.write("bar")
+        yield segment2.write(b"bar")
         yield writer.close_segment(segment2)
 
         result = yield writer.finish()
@@ -262,11 +274,11 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
 
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/manifest/segments/001")
-        self.assertEqual("foo", request.body)
+        self.assertEqual(b"foo", request.body)
 
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/manifest/segments/005")
-        self.assertEqual("bar", request.body)
+        self.assertEqual(b"bar", request.body)
 
         request = self.storage_service.assert_requested(
             "PUT", "/v1/container/manifest")
@@ -274,7 +286,7 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
             "container/manifest/segments",
             request.headers["X-Object-Manifest"])
         self.assertEqual("text/html", request.headers["Content-type"])
-        self.assertEqual("", request.body)
+        self.assertEqual(b"", request.body)
 
     # Need to add tests that verify etags, retry manifests, etc.
 
@@ -297,10 +309,10 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         container = yield self.client.fetch_container("container")
         obj = yield container.fetch_object("object")
         reader = yield obj.read_stream()
-        body = ""
+        body = bytearray()
         for read_chunk in reader:
             chunk = yield read_chunk
-            body += chunk
+            body.extend(chunk)
         self.assertEqual(OBJECT_BODY, body)
 
     @gen_test
@@ -309,9 +321,9 @@ class TestStorage(ServiceCaseHelpers, AsyncTestCase):
         container = yield self.client.fetch_container("container")
         obj = yield container.fetch_object("object")
         reader = yield obj.read_stream()
-        reader.next()
+        next(reader)
         with self.assertRaises(StreamError):
-            reader.next()
+            next(reader)
 
     @gen_test
     def test_read_stream_raises_with_bad_response(self):

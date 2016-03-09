@@ -2,8 +2,16 @@ import json
 import logging
 import hashlib
 import hmac
-import urllib
-import urlparse
+
+try:
+    from urllib import urlencode
+except ImportError:
+    from urllib.parse import urlencode
+
+try:
+    import urlparse
+except ImportError:
+    import urllib.parse as urlparse
 
 from tornado import gen
 from tornado.concurrent import Future
@@ -71,9 +79,10 @@ class StorageObject(object):
             raise MissingTempURLKey("'tempurl_key' parameter not provided.")
         expires = int(expires)
         path = urlparse.urlparse(self.object_url).path
-        base = "{0}\n{1}\n{2}".format(method, expires, path)
-        signature = hmac.new(self.tempurl_key, base, hashlib.sha1).hexdigest()
-        params = urllib.urlencode({
+        base = "{0}\n{1}\n{2}".format(method, expires, path).encode("utf8")
+        key = self.tempurl_key.encode("utf8")
+        signature = hmac.new(key, base, hashlib.sha1).hexdigest()
+        params = urlencode({
             "temp_url_expires": str(expires),
             "temp_url_sig": signature
         })
@@ -132,10 +141,11 @@ class StorageObject(object):
 
     @gen.coroutine
     def read(self, start=0, end=0):
-        body = ""
+        body = bytearray()
         reader = yield self.read_stream(start=start, end=end)
         for read_chunk in reader:
-            body += yield read_chunk
+            chunk = yield read_chunk
+            body.extend(chunk)
         raise gen.Return(body)
 
     @gen.coroutine
@@ -368,7 +378,7 @@ class SegmentWriter(object):
         segment_index = self.segment_indexes[id(segment)]
         self.segments[segment_index]["etag"] = result["md5sum"]
         self.segments[segment_index]["size_bytes"] = result["length"]
-        self.md5sum.update(result["md5sum"])
+        self.md5sum.update(result["md5sum"].encode("utf8"))
         raise gen.Return(result)
 
     @gen.coroutine

@@ -81,7 +81,7 @@ class IdentityClient(object):
                 "body": response.body
             })
 
-        auth_response = json.loads(response.body)
+        auth_response = json.loads(response.body.decode("utf8"))
         self.token = auth_response["access"]["token"]["id"]
         # this will need to be augmented for other openstack providers
         self.default_region = auth_response["access"].get("user", {}).get(

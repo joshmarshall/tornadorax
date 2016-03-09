@@ -92,7 +92,7 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
         result = yield queue.fetch_messages()
         self.assertEqual("error", result["status"])
         self.assertEqual(404, result["code"])
-        self.assertEqual("ERROR", result["body"])
+        self.assertEqual(b"ERROR", result["body"])
 
     @gen_test
     def test_push_message_succeeds(self):
@@ -110,7 +110,7 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
                 "Client-Id": queue.send_client_id})
 
         request = self.post_message_requests[0]
-        request = json.loads(request.body)
+        request = json.loads(request.body.decode("utf8"))
         self.assertEqual([{"ttl": 60, "body": message}], request)
 
     @gen_test
@@ -127,7 +127,7 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
         result = yield queue.push_message("FOOBAR", 60)
         self.assertEqual("error", result["status"])
         self.assertEqual(404, result["code"])
-        self.assertEqual("ERROR", result["body"])
+        self.assertEqual(b"ERROR", result["body"])
 
     @gen_test
     def test_wait_for_message_returns_after_multiple_fetches(self):

@@ -121,7 +121,7 @@ class TestLoadBalancer(ServiceCaseHelpers, AsyncTestCase):
                 "X-Auth-Token": "TOKEN",
                 "Content-type": "application/json"
             })
-        body = json.loads(request.body)["loadBalancer"]
+        body = json.loads(request.body.decode("utf8"))["loadBalancer"]
         self.assertEqual("a-new-loadbalancer", body["name"])
         self.assertEqual(8888, body["port"])
         self.assertEqual("HTTP", body["protocol"])

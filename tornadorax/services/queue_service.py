@@ -1,7 +1,11 @@
 import logging
 import json
 import uuid
-import urlparse
+
+try:
+    import urlparse
+except ImportError:
+    import urllib.parse as urlparse
 
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
@@ -67,7 +71,7 @@ class Queue(object):
                 "messages": []
             })
 
-        body = json.loads(response.body)
+        body = json.loads(response.body.decode("utf8"))
         next_urls = [l["href"] for l in body["links"] if l["rel"] == "next"]
         self.next_url = urlparse.urljoin(self.service_url, next_urls[0])
         messages = [m for m in body["messages"]]
@@ -98,7 +102,7 @@ class Queue(object):
                 "body": response.body
             })
 
-        body = json.loads(response.body)
+        body = json.loads(response.body.decode("utf8"))
         raise gen.Return({
             "status": "success",
             "resource": body["resources"][0]

@@ -11,6 +11,14 @@ from tornadorax.identity_client import IdentityClient, NoServiceCatalog
 from tests.helpers.foo_service import FooService
 from tests.samples import identity_samples
 
+try:
+    reload
+except NameError:
+    try:
+        from imp import reload
+    except ImportError:
+        from importlib import reload
+
 
 class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
 
@@ -50,7 +58,7 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
         request = self.identity_service.assert_requested(
             "POST", "/v2.0/tokens")
         self.assertEqual("application/json", request.headers["Content-type"])
-        body = json.loads(request.body)
+        body = json.loads(request.body.decode("utf8"))
         self.assertEqual(body["auth"], self.credentials)
 
     @gen_test
@@ -66,7 +74,7 @@ class TestIdentity(ServiceCaseHelpers, AsyncTestCase):
         result = yield self.client.authorize()
         self.assertEqual("error", result["status"])
         self.assertEqual(401, result["code"])
-        self.assertEqual("UNAUTHORIZED", result["body"])
+        self.assertEqual(b"UNAUTHORIZED", result["body"])
 
     @gen_test
     def test_authorize_retries_on_500s(self):
