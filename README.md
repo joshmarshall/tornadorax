@@ -10,3 +10,5 @@ transition to tornadostax over time.
 Right now it just includes queues (Zaqar eventually) and basic cloud
 files object operations.  Still way early. There are some example scripts
 in the examples/ directory.
+
+(Only supports 3.5+ as of Feb 2020.)
