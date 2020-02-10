@@ -11,7 +11,7 @@ class LoadBalancerService(object):
         self.service_url = service_url
         self.fetch_token = fetch_token
         self.ioloop = ioloop
-        self.client = AsyncHTTPClient(io_loop=self.ioloop)
+        self.client = AsyncHTTPClient()
 
     @gen.coroutine
     def fetch_load_balancers(self):

@@ -4,14 +4,7 @@ from tornado.testing import AsyncTestCase
 from tests.helpers.foo_service import FooService
 from tornadorax.services import service_registry
 
-try:
-    reload
-except NameError:
-    # Python 3 is fun.
-    try:
-        from imp import reload
-    except ImportError:
-        from importlib import reload
+from importlib import reload
 
 
 ENDPOINTS = [

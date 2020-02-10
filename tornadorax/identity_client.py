@@ -4,7 +4,6 @@ import logging
 import time
 
 import dateutil.parser
-from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
 from tornadorax.services import service_registry
@@ -19,7 +18,7 @@ class IdentityClient(object):
     def __init__(self, identity_url, credentials, ioloop):
         self.identity_url = identity_url
         self.credentials = credentials
-        self.client = AsyncHTTPClient(io_loop=ioloop)
+        self.client = AsyncHTTPClient()
         self.ioloop = ioloop
         self.service_catalog = None
         self.token = None
@@ -35,8 +34,7 @@ class IdentityClient(object):
         self._token_expires = calendar.timegm(
             dateutil.parser.parse(expiration_string).utctimetuple())
 
-    @gen.coroutine
-    def fetch_token(self):
+    async def fetch_token(self):
         # FIXME: If the identity service actually goes down for any
         # measurable length of time, these operations and retries may
         # start stacking and hammering the external service far more
@@ -48,20 +46,19 @@ class IdentityClient(object):
             self.token = None
 
         if self.token:
-            raise gen.Return(self.token)
+            return self.token
 
-        result = yield self.authorize()
-        raise gen.Return(result["token"])
+        result = await self.authorize()
+        return result["token"]
 
-    @gen.coroutine
-    def authorize(self):
+    async def authorize(self):
         full_url = self.identity_url + "/v2.0/tokens"
         body = json.dumps({"auth": self.credentials})
         headers = {"Content-type": "application/json"}
 
         with utilities.gen_retry(self.ioloop) as wait:
             while True:
-                response = yield self.client.fetch(
+                response = await self.client.fetch(
                     full_url, method="POST", body=body, headers=headers,
                     raise_error=False)
 
@@ -72,14 +69,14 @@ class IdentityClient(object):
                 LOGGER.warning(
                     "Retrying identity request ({0})".format(response.code))
 
-                yield wait()
+                await wait()
 
         if response.code > 299:
-            raise gen.Return({
+            return {
                 "status": "error",
                 "code": response.code,
                 "body": response.body
-            })
+            }
 
         auth_response = json.loads(response.body.decode("utf8"))
         self.token = auth_response["access"]["token"]["id"]
@@ -88,7 +85,7 @@ class IdentityClient(object):
             "RAX-AUTH:defaultRegion", None)
         self.token_expires = auth_response["access"]["token"]["expires"]
         self.service_catalog = auth_response["access"]["serviceCatalog"]
-        raise gen.Return({"status": "success", "token": self.token})
+        return {"status": "success", "token": self.token}
 
     def build_service(self, service_type, region=None, internal=False):
         if not self.service_catalog:

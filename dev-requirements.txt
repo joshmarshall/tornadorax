@@ -1,3 +1,2 @@
 testnado
-nose
-coverage
+pytest

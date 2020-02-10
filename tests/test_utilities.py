@@ -1,6 +1,6 @@
 import time
 
-import mock
+from unittest import mock
 from tornado.testing import AsyncTestCase, gen_test
 
 from tornadorax import utilities

@@ -49,27 +49,26 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
             ioloop=self.io_loop)
 
     @gen_test
-    def test_fetch_messages_returns_empty_list(self):
+    async def test_fetch_messages_returns_empty_list(self):
 
         def get_message_handle(handler):
             handler.set_status(204)
-            handler.finish("")
 
         self.queue_service.add_method(
             "GET", "/v1/queues/myqueue/messages", get_message_handle)
         self.start_services()
 
-        queue = yield self.client.fetch_queue("myqueue")
-        result = yield queue.fetch_messages()
+        queue = await self.client.fetch_queue("myqueue")
+        result = await queue.fetch_messages()
         self.assertEqual("success", result["status"])
         messages = result["messages"]
         self.assertEqual(0, len(messages))
 
     @gen_test
-    def test_fetch_messages_returns_messages_on_success(self):
+    async def test_fetch_messages_returns_messages_on_success(self):
         self.start_services()
-        queue = yield self.client.fetch_queue("myqueue")
-        result = yield queue.fetch_messages()
+        queue = await self.client.fetch_queue("myqueue")
+        result = await queue.fetch_messages()
         self.assertEqual("success", result["status"])
         messages = result["messages"]
         self.assertEqual(1, len(messages))
@@ -80,7 +79,7 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
                 "Client-Id": queue.receive_client_id})
 
     @gen_test
-    def test_fetch_messages_returns_reason_on_failure(self):
+    async def test_fetch_messages_returns_reason_on_failure(self):
         def fail_get_message(handler):
             handler.set_status(404)
             handler.write("ERROR")
@@ -88,19 +87,19 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
         self.queue_service.add_method(
             "GET", "/v1/queues/myqueue/messages", fail_get_message)
         self.start_services()
-        queue = yield self.client.fetch_queue("myqueue")
-        result = yield queue.fetch_messages()
+        queue = await self.client.fetch_queue("myqueue")
+        result = await queue.fetch_messages()
         self.assertEqual("error", result["status"])
         self.assertEqual(404, result["code"])
         self.assertEqual(b"ERROR", result["body"])
 
     @gen_test
-    def test_push_message_succeeds(self):
+    async def test_push_message_succeeds(self):
         self.start_services()
 
         message = {"event": "foo"}
-        queue = yield self.client.fetch_queue("myqueue")
-        result = yield queue.push_message(message, ttl=60)
+        queue = await self.client.fetch_queue("myqueue")
+        result = await queue.push_message(message, ttl=60)
         self.assertEqual("success", result["status"])
         self.assertTrue("resource" in result)
 
@@ -114,7 +113,7 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
         self.assertEqual([{"ttl": 60, "body": message}], request)
 
     @gen_test
-    def test_push_message_returns_reason_on_failure(self):
+    async def test_push_message_returns_reason_on_failure(self):
         def fail_push_message(handler):
             handler.set_status(404)
             handler.write("ERROR")
@@ -123,14 +122,14 @@ class TestQueue(ServiceCaseHelpers, AsyncTestCase):
             "POST", "/v1/queues/myqueue/messages", fail_push_message)
 
         self.start_services()
-        queue = yield self.client.fetch_queue("myqueue")
-        result = yield queue.push_message("FOOBAR", 60)
+        queue = await self.client.fetch_queue("myqueue")
+        result = await queue.push_message("FOOBAR", 60)
         self.assertEqual("error", result["status"])
         self.assertEqual(404, result["code"])
         self.assertEqual(b"ERROR", result["body"])
 
     @gen_test
-    def test_wait_for_message_returns_after_multiple_fetches(self):
+    async def test_wait_for_message_returns_after_multiple_fetches(self):
         # placeholder for a little more friendly interface for
         # tornaodo for longer polling
 
